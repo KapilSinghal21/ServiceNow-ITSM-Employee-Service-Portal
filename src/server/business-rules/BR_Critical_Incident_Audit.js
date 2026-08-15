@@ -5,7 +5,8 @@
  * Insert: true
  * Update: true
  *
- * Creates an audit note when an incident becomes Critical.
+ * Creates an audit note when an incident becomes Critical, and pushes a
+ * notification to the external ops webhook via ESPExternalNotifier.
  */
 
 (function executeRule(current, previous) {
@@ -22,5 +23,8 @@
         '[Employee Service Portal] Critical incident detected: ' +
         current.getDisplayValue('number')
     );
+
+    var notifier = new ESPExternalNotifier();
+    notifier.notifyExternalSystem(current);
 
 })(current, previous);

@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<unload unload_date="2026-08-10 11:22:47">
+<sys_script action="INSERT_OR_UPDATE">
+  <sys_id>e1a2f3c4d5b6478a9e0f1a2b3c4d5e6f</sys_id>
+  <name>BR_Auto_Assignment</name>
+  <collection>incident</collection>
+  <when>before</when>
+  <order>100</order>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Business Rule: Auto Assignment
+ * Table: Incident
+ * When: before
+ * Insert: true
+ * Update: true
+ *
+ * Adjust category values/group sys_ids for your PDI.
+ */
+
+(function executeRule(current, previous) {
+
+    if (!current.category) {
+        return;
+    }
+
+    var groupMap = {
+        'hardware': 'Hardware Support',
+        'software': 'Software Support',
+        'access': 'Access Management'
+    };
+
+    var targetGroup = groupMap[current.category.toString().toLowerCase()];
+
+    if (!targetGroup) {
+        targetGroup = 'Service Desk';
+    }
+
+    var group = new GlideRecord('sys_user_group');
+    group.addQuery('name', targetGroup);
+    group.setLimit(1);
+    group.query();
+
+    if (group.next()) {
+        current.assignment_group = group.getUniqueValue();
+    }
+
+})(current, previous);
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-10 18:22:04</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-08-09 20:14:33</sys_updated_on>
+</sys_script>
+<sys_script action="INSERT_OR_UPDATE">
+  <sys_id>a7b8c9d0e1f2438390a1b2c3d4e5f607</sys_id>
+  <name>BR_Critical_Incident_Audit</name>
+  <collection>incident</collection>
+  <when>after</when>
+  <order>100</order>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Business Rule: Critical Incident Audit
+ * Table: Incident
+ * When: after
+ * Insert: true
+ * Update: true
+ *
+ * Creates an audit note when an incident becomes Critical, and pushes a
+ * notification to the external ops webhook via ESPExternalNotifier.
+ */
+
+(function executeRule(current, previous) {
+
+    var becameCritical =
+        current.impact.toString() === '1' &&
+        (!previous || previous.impact.toString() !== '1');
+
+    if (!becameCritical) {
+        return;
+    }
+
+    gs.info(
+        '[Employee Service Portal] Critical incident detected: ' +
+        current.getDisplayValue('number')
+    );
+
+    var notifier = new ESPExternalNotifier();
+    notifier.notifyExternalSystem(current);
+
+})(current, previous);
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-10 18:22:04</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-08-09 20:14:33</sys_updated_on>
+</sys_script>
+<sys_script action="INSERT_OR_UPDATE">
+  <sys_id>c3d4e5f6a7b84592a3b4c5d6e7f80912</sys_id>
+  <name>BR_Catalog_Request_Sync</name>
+  <collection>sc_req_item</collection>
+  <when>after</when>
+  <order>100</order>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Business Rule: Catalog Request Sync
+ * Table: Requested Item (sc_req_item)
+ * When: after
+ * Update: true
+ * Condition: current.approval CHANGES
+ *
+ * Mirrors the requested item's approval state onto the parent Request so
+ * the requester sees a consistent status without opening each item, and
+ * kicks off the notifications defined in NOTIFICATION_CATALOG.md.
+ */
+
+(function executeRule(current, previous) {
+
+    if (!current.approval.changes()) {
+        return;
+    }
+
+    var approval = current.approval.toString();
+    var request = new GlideRecord('sc_request');
+
+    if (!request.get(current.request)) {
+        return;
+    }
+
+    if (approval === 'approved') {
+        gs.eventQueue('esp.request.approved', current, current.request_item, current.cat_item.getDisplayValue());
+    } else if (approval === 'rejected') {
+        current.state = 'closed_incomplete';
+        current.update();
+        gs.eventQueue('esp.request.rejected', current, current.request_item, current.cat_item.getDisplayValue());
+    }
+
+})(current, previous);
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-10 18:22:04</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-08-09 20:14:33</sys_updated_on>
+</sys_script>
+<sys_script_client action="INSERT_OR_UPDATE">
+  <sys_id>f1e2d3c4b5a64768a5b6c7d8e9f0a1b2</sys_id>
+  <name>CS_Critical_Impact</name>
+  <table>incident</table>
+  <type>onChange</type>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Client Script: Critical Impact Validation
+ * Type: onChange
+ * Table: Incident
+ * Field: Business Impact
+ */
+
+function onChange(control, oldValue, newValue, isLoading) {
+    if (isLoading) {
+        return;
+    }
+
+    var justificationField = 'u_business_justification';
+
+    if (newValue === 'critical') {
+        g_form.setMandatory(justificationField, true);
+        g_form.showFieldMsg(
+            justificationField,
+            'Business justification is required for Critical impact incidents.',
+            'info'
+        );
+    } else {
+        g_form.setMandatory(justificationField, false);
+    }
+}
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-09 14:11:32</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-07-13 21:06:58</sys_updated_on>
+</sys_script_client>
+<sys_script_client action="INSERT_OR_UPDATE">
+  <sys_id>9a8b7c6d5e4f4a3b8c9d0e1f2a3b4c5d</sys_id>
+  <name>CS_Get_Open_Incident_Count</name>
+  <table>incident</table>
+  <type>onLoad</type>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Client Script: Get Open Incident Count
+ * Type: onLoad
+ * Table: Incident
+ *
+ * Demonstrates asynchronous GlideAjax.
+ */
+
+function onLoad() {
+    var ga = new GlideAjax('ESPIncidentUtils');
+    ga.addParam('sysparm_name', 'getOpenIncidentCount');
+    ga.getXMLAnswer(function(answer) {
+        var count = parseInt(answer, 10) || 0;
+
+        if (count > 0) {
+            g_form.addInfoMessage(
+                'You currently have ' + count + ' open incident(s).'
+            );
+        }
+    });
+}
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-09 14:11:32</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-07-13 21:06:58</sys_updated_on>
+</sys_script_client>
+<sys_script_include action="INSERT_OR_UPDATE">
+  <sys_id>2b3c4d5e6f7a4859a1b2c3d4e5f6a7b8</sys_id>
+  <name>ESPIncidentUtils</name>
+  <api_name>x_kap_esp.ESPIncidentUtils</api_name>
+  <client_callable>true</client_callable>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Script Include: ESPIncidentUtils
+ * Client callable: true
+ *
+ * Demonstrates GlideRecord + GlideAjax.
+ */
+
+var ESPIncidentUtils = Class.create();
+ESPIncidentUtils.prototype = Object.extendsObject(AbstractAjaxProcessor, {
+
+    getOpenIncidentCount: function() {
+        var count = 0;
+        var userId = gs.getUserID();
+
+        var gr = new GlideRecord('incident');
+        gr.addQuery('caller_id', userId);
+        gr.addQuery('active', true);
+        gr.query();
+
+        while (gr.next()) {
+            count++;
+        }
+
+        return count.toString();
+    },
+
+    type: 'ESPIncidentUtils'
+});
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-09 13:58:20</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-08-09 20:16:02</sys_updated_on>
+</sys_script_include>
+<sys_script_include action="INSERT_OR_UPDATE">
+  <sys_id>7d8e9f0a1b2c4d3ea5b6c7d8e9f0a1b2</sys_id>
+  <name>ESPExternalNotifier</name>
+  <api_name>x_kap_esp.ESPExternalNotifier</api_name>
+  <client_callable>false</client_callable>
+  <active>true</active>
+  <script><![CDATA[/*
+ * Script Include: ESPExternalNotifier
+ * Client callable: false
+ *
+ * Sends a REST callout to an external ops/incident-management webhook
+ * whenever an incident in this app becomes Critical, so on-call tooling
+ * outside ServiceNow (Slack/Teams channel, PagerDuty, etc.) gets notified
+ * without polling the instance.
+ *
+ * The outbound REST Message record ("ESP Ops Webhook") holds the actual
+ * endpoint URL and auth, configured per-environment — nothing here is
+ * environment specific.
+ */
+
+var ESPExternalNotifier = Class.create();
+ESPExternalNotifier.prototype = {
+    initialize: function() {},
+
+    REST_MESSAGE_NAME: 'ESP Ops Webhook',
+    REST_MESSAGE_METHOD: 'notify_critical',
+
+    notifyExternalSystem: function(incidentGr) {
+        if (!incidentGr || !incidentGr.isValidRecord()) {
+            return false;
+        }
+
+        try {
+            var request = new sn_ws.RESTMessageV2(this.REST_MESSAGE_NAME, this.REST_MESSAGE_METHOD);
+
+            var payload = {
+                number: incidentGr.getValue('number'),
+                short_description: incidentGr.getValue('short_description'),
+                assignment_group: incidentGr.getDisplayValue('assignment_group'),
+                impact: incidentGr.getValue('impact'),
+                sys_id: incidentGr.getUniqueValue(),
+                instance_url: gs.getProperty('glide.servlet.uri') + 'incident.do?sys_id=' + incidentGr.getUniqueValue()
+            };
+
+            request.setRequestBody(JSON.stringify(payload));
+            var response = request.execute();
+            var status = response.getStatusCode();
+
+            if (status < 200 || status >= 300) {
+                gs.warn('[ESPExternalNotifier] Webhook call for ' + payload.number +
+                    ' returned status ' + status);
+                return false;
+            }
+
+            return true;
+        } catch (ex) {
+            gs.error('[ESPExternalNotifier] Failed to notify external system: ' + ex.getMessage());
+            return false;
+        }
+    },
+
+    type: 'ESPExternalNotifier'
+};
+]]></script>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-09 13:58:20</sys_created_on>
+  <sys_updated_by>kapil.singhal</sys_updated_by>
+  <sys_updated_on>2026-08-09 20:16:02</sys_updated_on>
+</sys_script_include>
+<sys_ws_definition action="INSERT_OR_UPDATE">
+  <sys_id>8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f</sys_id>
+  <name>ESP Incident Summary API</name>
+  <service_id>incident_summary</service_id>
+  <base_uri>api/x_kap_esp/incident_summary</base_uri>
+  <active>true</active>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-08-08 16:40:11</sys_created_on>
+</sys_ws_definition>
+<sys_ws_operation action="INSERT_OR_UPDATE">
+  <sys_id>6a7b8c9d0e1f4a2bb3c4d5e6f7a8b9c0</sys_id>
+  <name>Get incident summary</name>
+  <http_method>GET</http_method>
+  <relative_path>/</relative_path>
+  <operation_script><![CDATA[/*
+ * Scripted REST Resource: Incident Summary
+ * API: ESP Incident Summary API
+ * Base path: /api/x_kap_esp/incident_summary
+ * Method: GET
+ * Required role: x_kap_esp.it_manager
+ *
+ * Read-only endpoint for external systems (reporting tools, status pages)
+ * to pull a lightweight open-incident count by assignment group without
+ * needing direct table access.
+ */
+
+(function process(/*RESTAPIRequest*/ request, /*RESTAPIResponse*/ response) {
+
+    var groups = ['Service Desk', 'Hardware Support', 'Software Support', 'Access Management'];
+    var summary = [];
+
+    groups.forEach(function(groupName) {
+        var gr = new GlideRecord('incident');
+        gr.addQuery('assignment_group.name', groupName);
+        gr.addQuery('active', true);
+        gr.query();
+
+        summary.push({
+            group: groupName,
+            open_incidents: gr.getRowCount()
+        });
+    });
+
+    response.setStatus(200);
+    response.setBody({
+        generated_on: new GlideDateTime().getDisplayValue(),
+        summary: summary
+    });
+
+})(request, response);
+]]></operation_script>
+  <web_service_definition>8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f</web_service_definition>
+  <required_acl_roles>x_kap_esp.it_manager</required_acl_roles>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-08-08 16:41:47</sys_created_on>
+</sys_ws_operation>
+<sys_rest_message action="INSERT_OR_UPDATE">
+  <sys_id>3f4a5b6c7d8e49a0b1c2d3e4f5a6b7c8</sys_id>
+  <name>ESP Ops Webhook</name>
+  <rest_endpoint/>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-08-08 15:02:30</sys_created_on>
+</sys_rest_message>
+<sys_rest_message_fn action="INSERT_OR_UPDATE">
+  <sys_id>1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6</sys_id>
+  <name>notify_critical</name>
+  <http_method>POST</http_method>
+  <rest_message>3f4a5b6c7d8e49a0b1c2d3e4f5a6b7c8</rest_message>
+  <content>[[payload]]</content>
+  <sys_scope>x_kap_esp</sys_scope>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-08-08 15:04:12</sys_created_on>
+</sys_rest_message_fn>
+<sys_remote_update_set action="INSERT_OR_UPDATE">
+  <sys_id>d4e5f6a7b8c94d3e9f0a1b2c3d4e5f60</sys_id>
+  <name>Employee Service Portal - Core Build</name>
+  <description>Client Scripts, Business Rules, Script Includes, and REST integration for the Employee Service Portal incident and catalog request flows.</description>
+  <application>x_kap_esp</application>
+  <state>complete</state>
+  <remote_sys_id>d4e5f6a7b8c94d3e9f0a1b2c3d4e5f60</remote_sys_id>
+  <sys_created_by>kapil.singhal</sys_created_by>
+  <sys_created_on>2026-07-09 13:40:02</sys_created_on>
+</sys_remote_update_set>
+</unload>

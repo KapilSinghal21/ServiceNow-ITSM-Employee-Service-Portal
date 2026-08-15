@@ -23,4 +23,4 @@ Example agent access:
 Example manager access:
 - User has the IT Manager role.
 
-Test ACLs using impersonation before publishing screenshots.
+Test ACLs using impersonation before considering the rule done.
